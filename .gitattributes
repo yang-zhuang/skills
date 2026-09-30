@@ -1,0 +1,7 @@
+# 文本文件统一以 LF 存取。
+#
+# 本仓的技能包用 sha256 指纹自校（如 paper-screening-pipeline/scripts/BASE.txt
+# 记录 6 个脚本的 sha256）。系统级 gitconfig 里 core.autocrlf=true，checkout 时
+# 会把 LF 换成 CRLF —— 文件内容没变，但 sha256 全变，指纹校验会静默失效
+# （BASE.txt 自己也一起被换）。用 eol=lf 覆盖，保证 clone / checkout 后与本机一致。
+* text=auto eol=lf
