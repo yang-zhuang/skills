@@ -35,7 +35,7 @@ rubric 与论文全文的重复阅读，而视角隔离换不来判定质量，�
 |---|---|---|
 | rubric（字段规范） | `references/RUBRIC.md` | 唯一判定标准；人批修改只发生在这里 |
 | 执行/评审/修改作业文档 | `references/{EXTRACT,EVALUATION,REVISE}.md` | 就是发给对应子 agent 的指令正文，闭环迭代的对象 |
-| 6 个脚本 | `scripts/`（复制进 workspace 根目录后运行） | 纯标准库，Python 3.10+ |
+| 7 个脚本 | `scripts/`（复制进 workspace 根目录后运行） | 纯标准库，Python 3.10+ |
 | 已 OCR 的论文池 | `<workspace>/ocr_out/`（`screen_papers.py` 认的目录结构） | 唯一的 workspace 硬前置，缺了抽不到论文 |
 
 脚本通过 `screen_papers.py` 顶部的 `REF_DIR` 常量定位本包 `references/`（默认
@@ -45,7 +45,7 @@ rubric 与论文全文的重复阅读，而视角隔离换不来判定质量，�
 
 ```
 <workspace>/
-├─ screen_papers.py 等 6 个脚本        从本包 scripts/ 复制来的运行副本
+├─ screen_papers.py 等 7 个脚本        从本包 scripts/ 复制来的运行副本
 ├─ runs/
 │   ├─ batch_NNN/
 │   │   ├─ manifest.json              锁 rubric/执行文档的 sha1 —— 版本号会记错，指纹不会
@@ -72,6 +72,13 @@ rubric / 执行文档指纹（最早几批锁 `screen_rubric.md` 的 `8772d5c0d3
 # 1 建批（纯代码）：抽 n 篇新论文，自动排除历史批次已用过的 paper_id，
 #   manifest 锁当前 rubric/执行文档的 sha1
 python prepare_batch.py --seed 1009 --n 6
+
+# 1' 分层建批（2026-10-01 新增）：按内容类型给固定配额，保证低频型不被饿死。
+#    纯随机抽样在 1500+ 篇的池上会公平地饿死低频型——综述只占 1.3%，
+#    连跑 21 批随机抽样一篇综述都没测到过。先跑一次分类器建分桶：
+python classify_papers.py                          # 写 runs/paper_types.jsonl
+python prepare_batch.py --seed 1016 --strata 1      # 8 型各 1 篇
+python prepare_batch.py --seed 1015 --strata 2 --types survey,theory,nonstandard  # 给低频型加量
 
 # 2 抽取：每篇派一个全新执行 agent
 # 3 评审：每篇派一个全新评审 agent
@@ -209,14 +216,15 @@ JSON 全文搬进自己的上下文——多批迭代时主 agent 会先爆。
 
 | 文件 | 怎么用 | 什么时候用到 |
 |---|---|---|
-| `prepare_batch.py` | CLI | 建批：抽样（排除历史）、组装输入、锁 sha1；`--papers` 定向回归（只跑指定论文，见第三节） |
+| `prepare_batch.py` | CLI | 建批：抽样（排除历史）、组装输入、锁 sha1；`--papers` 定向回归（只跑指定论文，见第三节）；`--strata N` 按内容类型分层抽样（配合 `--types` 给低频型加量） |
+| `classify_papers.py` | CLI | 论文内容类型分类器（确定性规则，不调用 LLM）：按 venue + 标题 + 摘要 + 章节标题把全池分成 8 型，写 `runs/paper_types.jsonl`，供 `--strata` 分桶。`--pid` 单篇诊断，`--types` 按型列举 |
 | `cluster_reviews.py` | CLI | 聚类评审 JSON（指标 + 高频分组 + **跨批复现判定**），**并内置评审引用核验**；核验不过退出码 1 |
 | `collect_extracts.py` | CLI | 校验/汇总抽取产出，并生成评审专用的 `<pid>.fields.json` |
 | `check_draft.py` | CLI | 修改稿契约校验（8 项闸门）；`--apply` 过闸门即落地（快照旧版 + 覆盖执行文档）；退出码非 0 绝不落地 |
 | `orchestrate.py` | CLI（可选） | API 直调版编排（跳过 agent，需 OpenAI 兼容 endpoint）；`--dry-run` 可单测 prompt 组装 |
 | `screen_papers.py` | 库 | 被 `prepare_batch` / `collect_extracts` / `orchestrate` / `check_draft` import（输入组装、`load_prompt`、`extract_json` 解析器） |
 
-`scripts/BASE.txt` 是 6 个脚本的 sha256 指纹（`sha256sum -c BASE.txt` 可实测校验）。**发行版
+`scripts/BASE.txt` 是 7 个脚本的 sha256 指纹（`sha256sum -c BASE.txt` 可实测校验）。**发行版
 `scripts/` 是只读基线**：脚本的演进发生在 workspace，确认稳定后回灌本包并重算指纹。
 
 ## 十、参考文档（按角色分发，按需读）
@@ -228,4 +236,4 @@ JSON 全文搬进自己的上下文——多批迭代时主 agent 会先爆。
 | `references/EVALUATION.md` | 评估 agent | 派工时随 RUBRIC.md + inputs + fields.json 一起给（不给 extract 原文） |
 | `references/REVISE.md` | 修改 agent（主 agent 过滤意见同用） | 派修改前，附过滤后清单 |
 | `references/LESSONS.md` | 主 agent | 改 rubric/执行文档之前先翻：这类问题以前踩过没有（含 base 指纹） |
-| `references/ruling_*.md`、`references/regression_*.md`、`references/generalization_*.md` | 人 / 主 agent | 人批裁决的落地记录、改后回归核对表、新批泛化检验报告。改 rubric 前先翻：这条以前裁过没有；跑新批前先翻泛化报告：这类问题跨批复现没有。权威副本在包内，workspace 的 `runs/` 下是运行期副本（同 `BASE.txt` 模式） |
+| `references/ruling_*.md`、`references/regression_*.md`、`references/generalization_*.md`、`references/coverage_*.md` | 人 / 主 agent | 人批裁决的落地记录、改后回归核对表、新批泛化检验报告、内容类型覆盖测试报告。改 rubric 前先翻：这条以前裁过没有；跑新批前先翻泛化报告：这类问题跨批复现没有；怀疑某类论文测漏了先翻覆盖报告：按类型看 coverage。权威副本在包内，workspace 的 `runs/` 下是运行期副本（同 `BASE.txt` 模式） |

@@ -20,6 +20,15 @@ prepare_batch.py — 闭环第 1 步（选批次）：为一个新批次生成�
   python prepare_batch.py --papers a,b,c                 # 定向回归：只跑指定论文，跳过随机抽样与历史排除
                                                          # （改 rubric 后验证「被判过的篇还判不判」用这个，
                                                          #   随机抽样抽不到目标篇，--no-exclude 也不行）
+  python prepare_batch.py --seed 1002 --strata 2         # 分层抽样：每个内容类型抽 2 篇（广度覆盖）
+  python prepare_batch.py --seed 1002 --strata 3 --types survey,theory,nonstandard
+                                                         # 只在指定类型里分层（给低频型加量）
+
+为什么要有 --strata：纯随机抽样在 1500+ 篇的池上会按占比自然流出，低频类型几乎抽不到
+（综述只占 1.3%，连跑 20 批随机抽样的期望命中不到 3 篇）。rubric 在这些类型上的行为
+就永远没被测过 —— 例如「综述类论文该填 `不训练` 还是 `[]`」从未被实证。
+分层抽样按类型给固定配额，保证每批都覆盖到低频型。
+分桶依据是 classify_papers.py 产出的 runs/paper_types.jsonl（确定性规则，不调用 LLM）。
 '''
 
 import os
@@ -34,6 +43,13 @@ from screen_papers import (
     find_completed, load_metadata, load_page_text, load_all_headings, assemble_input,
     REF_DIR,
 )
+
+# 分层抽样的类型顺序（与 classify_papers.ORDER 一致：命中即停的优先级链）
+try:
+    from classify_papers import ORDER as TYPE_ORDER
+except Exception:
+    TYPE_ORDER = ['nonstandard', 'survey', 'resource', 'system',
+                  'theory', 'analysis', 'method', 'empirical']
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNS_DIR = os.path.join(BASE_DIR, 'runs')
@@ -99,6 +115,10 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='只打印将选中的 paper_id，不落盘')
     ap.add_argument('--no-exclude', action='store_true', help='不排除历史批次（仅对照实验显式使用）')
     ap.add_argument('--papers', default='', help='逗号分隔的 paper_id 清单：定向回归，跳过随机抽样与历史排除')
+    ap.add_argument('--strata', type=int, default=0,
+                    help='分层抽样：每个内容类型抽 N 篇（类型来自 runs/paper_types.jsonl）')
+    ap.add_argument('--types', default='',
+                    help='配合 --strata：限定参与分层的类型（逗号分隔）')
     args = ap.parse_args()
 
     rows = find_completed()
@@ -120,6 +140,43 @@ def main():
         pids = want
         used = used_paper_ids()
         print(f'定向回归：指定 {len(pids)} 篇（跳过随机抽样与历史排除）')
+    elif args.strata:
+        used = set() if args.no_exclude else used_paper_ids()
+        tpath = os.path.join(RUNS_DIR, 'paper_types.jsonl')
+        if not os.path.isfile(tpath):
+            print(f'缺 {tpath}，先跑 python classify_papers.py 生成类型分桶。')
+            return
+        tmap = {}
+        for ln in open(tpath, encoding='utf-8'):
+            ln = ln.strip()
+            if ln:
+                r = json.loads(ln)
+                tmap[r['paper_id']] = r['type']
+        by_id = {r[0]: r for r in rows}
+        want_types = set(x.strip() for x in args.types.split(',') if x.strip())
+        groups = {}
+        for pid, ty in sorted(tmap.items()):
+            if pid not in by_id or pid in used:
+                continue
+            if want_types and ty not in want_types:
+                continue
+            groups.setdefault(ty, []).append(pid)
+
+        random.seed(args.seed)
+        picked, pids, quota = [], [], {}
+        for ty in TYPE_ORDER:
+            g = groups.get(ty, [])
+            k = min(args.strata, len(g))
+            quota[ty] = k
+            for pid in random.sample(g, k):
+                picked.append(by_id[pid])
+                pids.append(pid)
+        print(f'分层抽样：每型 {args.strata} 篇 | 可用 {len(tmap)} 篇 | 历史已用 {len(used)} 篇')
+        print('  配额: ' + ', '.join(f'{t}={q}(池{len(groups.get(t, []))})'
+                                     for t, q in quota.items()))
+        if not pids:
+            print('无可用论文（全部已用或类型被 --types 过滤空）。')
+            return
     else:
         used = set() if args.no_exclude else used_paper_ids()
         pool = [r for r in rows if r[0] not in used]
@@ -161,7 +218,8 @@ def main():
     manifest = {
         'batch': f'batch_{no:03d}',
         'seed': args.seed,
-        'selector': 'papers' if args.papers else 'random',
+        'selector': ('papers' if args.papers else
+                     ('strata:%d' % args.strata if args.strata else 'random')),
         'n': n_input,
         'paper_ids': pids,
         'excluded_used': len(used),
@@ -172,6 +230,16 @@ def main():
         'max_pages': 2,
         'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
+    if args.strata:
+        # 记录本批的类型构成：跨批对账时按类型看覆盖，而不是只看篇数
+        manifest['type_quota'] = quota
+        tmap2 = {}
+        for ln in open(os.path.join(RUNS_DIR, 'paper_types.jsonl'), encoding='utf-8'):
+            ln = ln.strip()
+            if ln:
+                r = json.loads(ln)
+                tmap2[r['paper_id']] = r['type']
+        manifest['paper_types'] = {p: tmap2.get(p, '?') for p in pids}
     with open(os.path.join(bdir, 'manifest.json'), 'w', encoding='utf-8') as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
