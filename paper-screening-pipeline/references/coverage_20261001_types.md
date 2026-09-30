@@ -1,4 +1,4 @@
-# 内容类型覆盖测试（2026-10-01，batch_021~024，共 28 篇）
+# 内容类型覆盖测试（2026-10-01，batch_021~026，共 37 篇）
 
 ## 一、起因：随机抽样会饿死低频类型
 
@@ -69,18 +69,19 @@ survey 只占 1.3%，纯随机抽样连跑 20 批的期望命中不到 3 篇 —
 
 | 类型 | 篇数 | violation | rubric_issue | 判定 |
 |---|---|---|---|---|
-| nonstandard 非标准 | 5 | **1** | 2 | ⚠️ 唯一出 violation 的类型 |
-| survey 综述 | 4 | 0 | 0 | ✅ 首次实测，4/4 干净 |
+| nonstandard 非标准 | **10** | **2** | **5** | ⚠️ 唯一出 violation 的类型 |
+| survey 综述 | **6** | 0 | 0 | ✅ 首次实测，6/6 干净 |
 | resource 资源型 | 2 | 0 | 0 | ✅ |
 | system 应用型 | 4 | 0 | 2 | ⚠️ 条款歧义，非违规 |
-| theory 理论 | 4 | 0 | 1 | ⚠️ 条款歧义，非违规 |
+| theory 理论 | **6** | 0 | 1 | ⚠️ 条款歧义，非违规 |
 | analysis 机制分析 | 4 | 0 | 0 | ✅ |
 | method 方法模型 | 3 | 0 | 1 | ⚠️ 条款歧义，非违规 |
 | empirical 实验 | 2 | 0 | 0 | ✅ |
-| **合计** | **28** | **1** | **6** | violation 率 3.6% |
+| **合计** | **37** | **2** | **9** | violation 率 5.4% |
 
 逐批：batch_021 violation 0/6（ri 2）、batch_022 violation **1/6**（ri 1）、
-batch_023 violation 0/8（ri 3）、batch_024 violation **0/8（ri 0，全清）**。
+batch_023 violation 0/8（ri 3）、batch_024 violation **0/8（ri 0，全清）**、
+batch_025 violation 0/3（ri 2）、batch_026 violation **1/6**（ri 1）。
 
 ### 唯一那条 violation
 
@@ -107,7 +108,45 @@ batch_023 violation 0/8（ri 3）、batch_024 violation **0/8（ri 0，全清）
 3. **广度轮 2（batch_024）全清**，说明轮 1 的 3 条 rubric_issue 是样本触发的条款缝隙，
    不是系统性回退。
 
-## 六、落档与去向
+## 六、第二轮：nonstandard 加量与低频型复测（batch_025 / 026）
+
+| 批次 | seed | 抽样方式 | 篇数 | 目的 |
+|---|---|---|---|---|
+| batch_025 | 1018 | strata 3 × nonstandard | 3 | 攻上一轮唯一出 violation 的类型 |
+| batch_026 | 1019 | strata 2 × (survey, theory, nonstandard) | 6 | 低频三型加量 |
+
+batch_025 violation 0/3（引用核验 3/3），batch_026 violation 1/6（核验 6/6）。
+两批 9 篇 violation 1 → 11.1%，**仍全部落在 nonstandard**；survey 追加 2 篇后累计 6/6 干净。
+
+### 那条 violation（`2026.acl-srw.47`，nonstandard）
+
+- 抽取填 `training_paradigm = ["不训练"]`
+- 评审判 §4 违规、建议 `[]`：原文「a more careful setup than the standard
+  "train a text classifier and report AUC" recipe」说明训练动作并未取消，
+  但全文只有泛化的 `train`，无 `fine-tune` / `RLHF` / `DPO` 等任一范式族信号词，
+  按推定边界条应落 `[]`
+- **冲突点**：§4 最近一次人裁刚把「判别模型/预测器 `train a classifier`」并入 SFT 外延，
+  而推定边界条说「表内一个信号词都没有时禁止推定 → `[]`」。同一句话两条规则给出
+  `SFT` 与 `[]` 两个答案 —— 这是 rubric 自相矛盾，不是执行端抽错
+
+### 第二轮的两条 rubric_issue
+
+- `2026.acl-srw.6` §1：上限「不超过 6 字」与正例 `多模态情绪识别`（7 字）直接冲突——
+  该条修订记录里自己写着「与正例（6~7 字）自相矛盾」，却仍把上限留在 6 字，没修干净
+- `2026.acl-tutorials.6` §2：教程 / 综述 / position 类原文不陈述痛点缺口时，
+  research_question 没有「信息不足」出口，只能在硬编缺口句与留空之间二选一
+
+## 七、待裁候选（按聚集度排序）
+
+| 条款 | 跨批聚集 | 本轮新增的具体情形 | 判据 |
+|---|---|---|---|
+| §5 `base_model` 什么算可指认标识 | **10 批**（b002,003,004,006,007,014,015,021,023,026） | `GraphSAGE-style` / `BERT` 这类架构名带 `-style` `-based` 后缀算不算 | 聚集度最高，条款最模糊 |
+| §4 `training_paradigm` 泛化训练动词 | 6 批（b002,003,007,011,015,026） | `train a classifier` 该落 `SFT`（按新裁决的外延）还是 `[]`（按推定边界条） | rubric 内部矛盾，机器可查 |
+| §3 模板第三槽缺省 | 2 批（b016 的 srw.78 + b022 的 findings-acl.1154） | 材料未披露关键规模/结果时第三槽能否缺省 | 已达动手阈值 |
+| §2 教程/综述的「信息不足」出口 | 2 批（b002,b025） | 见上 | 观察中 |
+| §1 字数上限 6 字 vs 正例 7 字 | 本轮首次（b025） | 修订记录自认矛盾却未改 | 事实矛盾，可顺手修 |
+
+## 八、落档与去向
 
 - 本报告：`runs/coverage_20261001_types.md`，包内副本 `references/` 同名文件。
 - 新增脚本 `classify_papers.py` 与 `prepare_batch.py` 的 `--strata` / `--types` 参数，
