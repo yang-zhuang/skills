@@ -208,6 +208,7 @@ JSON 全文搬进自己的上下文——多批迭代时主 agent 会先爆。
 | 修改后的执行文档出现「如前所述/第一部分」类指代 | 指代指向错误是修改 agent 的高发残留，`check_draft.py` 只报 WARN 不出 FAIL（无法自动判对错），必须人工复核指代表述 |
 | `check_draft.py` 报 FAIL | 修改 agent 改坏了下游要解析的东西（键名/代码块/两步顺序）——把 FAIL 明细原样回给它重做，**不许人工修补 draft** |
 | `cluster_reviews.py` 报「引用核验未通过」 | 评审的 `current`/`evidence` 不是原样抄录——重发那几篇评审 agent；不合格的评审不参与聚类 |
+| `cluster_reviews.py` 报「current 为空」 | 被判违规的字段原值本就是空字符串，逐字比对无从下手——让评审补 `field` 字段名，核验改走字段名路径（`EVALUATION.md` 已写明） |
 | 改完 rubric 跑新批看不出改善 | 条款越界类触发率极低，新批抽不到目标篇——改用 `prepare_batch.py --papers` 定向回归，执行端与评审端都重跑（见第三节） |
 
 ## 九、`scripts/` 里有什么

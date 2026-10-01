@@ -81,9 +81,11 @@ def verify_refs(bdir, files):
         fj = os.path.join(bdir, 'extracts', pid + '.fields.json')
         ip = os.path.join(bdir, 'inputs', pid + '.txt')
         f_txt = open(fj, encoding='utf-8').read() if os.path.isfile(fj) else ''
+        f_obj = {}
         if f_txt:
             try:
-                f_txt += '\n' + json.dumps(json.loads(f_txt).get('fields', {}), ensure_ascii=False)
+                f_obj = json.loads(f_txt).get('fields', {}) or {}
+                f_txt += '\n' + json.dumps(f_obj, ensure_ascii=False)
             except Exception:
                 pass
         i_txt = open(ip, encoding='utf-8').read() if os.path.isfile(ip) else ''
@@ -94,7 +96,14 @@ def verify_refs(bdir, files):
             cur = str(f.get('current', '')).strip()
             segs = [s.strip() for s in re.split(r'[；;]', cur) if s.strip()]
             if not segs:
-                bad.append('current 为空')
+                # 空值违规（该字段抽出来就是 "" 或 []）：逐字比对无从下手，
+                # 改按字段名核验 —— fields.json 里该字段确实为空才算可核对。
+                fname = str(f.get('field', '')).strip()
+                if not fname:
+                    bad.append('current 为空且未给 field 名')
+                elif f_obj.get(fname, '∅') not in ('', [], None):
+                    bad.append('current 为空但 fields[%s] 非空：%r' % (fname, f_obj.get(fname)))
+                continue
             for s in segs:
                 if s not in f_txt:
                     bad.append('current 不在 fields.json: ' + s[:40])
