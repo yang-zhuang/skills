@@ -1,0 +1,53 @@
+{
+  "name": "default",
+  "body_color": "#3f3f3f",
+  "body_size": "15px",
+  "line_height": "1.7em",
+  "h1_size": "22px",
+  "h2_size": "18px",
+  "h3_size": "16px",
+  "accent": "#1a7f37",
+  "code_bg": "#f6f8fa",
+  "code_color": "#24292e",
+  "quote_color": "#6a737d",
+  "link_color": "#576b95",
+  "font_stack": "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+  "components": {
+    "note": {
+      "background": "#f4f8f5",
+      "padding": "8px 10px",
+      "border-radius": "6px",
+      "border-left": "3px solid #1a7f37",
+      "margin": "6px 0px"
+    },
+    "warn": {
+      "background": "#fff8f0",
+      "padding": "8px 10px",
+      "border-radius": "6px",
+      "border-left": "3px solid #e67e22",
+      "margin": "6px 0px"
+    },
+    "card": {
+      "background": "#ffffff",
+      "box-shadow": "0 1px 6px rgba(0,0,0,0.06)",
+      "border-radius": "8px",
+      "padding": "12px 14px",
+      "margin": "12px 0px"
+    },
+    "verdict": {
+      "background": "#1e293b",
+      "color": "#e2e8f0",
+      "strong_color": "#facc15",
+      "padding": "13px 14px",
+      "border-radius": "10px",
+      "margin": "14px 0px",
+      "text-align": "center"
+    },
+    "footer": {
+      "color": "#999999",
+      "padding": "0px",
+      "margin": "14px 0px 0px",
+      "text-align": "center"
+    }
+  }
+}

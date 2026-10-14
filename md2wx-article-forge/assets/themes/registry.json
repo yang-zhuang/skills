@@ -1,0 +1,13 @@
+{
+  "_comment": "历史主题登记。只存 name 与 file —— 色值与卡片形态由 theme_lint.py 从主题文件现场计算，手抄两份必然失同步。新增主题后跑：python scripts/theme_lint.py <theme.json> --register",
+  "themes": [
+    {
+      "name": "critique",
+      "file": "critique.json"
+    },
+    {
+      "name": "default",
+      "file": "default.json"
+    }
+  ]
+}
