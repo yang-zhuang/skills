@@ -1,0 +1,203 @@
+# 术语表 —— translate-zh 的唯一真相源
+#
+# 生成方式：scan_corpus.py 扫描 744 篇真实语料 → 人工确认后填入本文件。
+# SKILL.md 里不重复列举术语，执行时读本文件。
+# 频次 = 该词在语料中的真实出现次数，用来决定「值不值得为它定规则」。
+
+meta:
+  corpus: G:/05_代码项目/blog-research-crawlers
+  scanned_files: 744
+  generated: 2026-10-02
+  candidates: data/candidates.md   # 未确认的完整候选清单
+
+# ---------------------------------------------------------------------------
+# keep：原样保留，不翻译
+# 判据：中文技术读者一眼就懂，且翻译后会产生歧义或变得难检索
+# ---------------------------------------------------------------------------
+keep:
+  # 公司与产品（专有名词，翻了反而认不出）
+  - Anthropic
+  - OpenAI
+  - NVIDIA
+  - LangChain
+  - LangGraph
+  - LangSmith
+  # 模型名
+  - Claude
+  - GPT
+  - GLM
+  - Mythos
+  - Opus
+  - Sonnet
+  - Haiku
+  # 架构名：翻成中文会产生歧义
+  # Transformer -> 变换器 会被误读成电力变压器，这是设定 keep 的最典型理由
+  - Transformer
+  - BERT
+  - LSTM
+  - CNN
+  - GAN
+  - VAE
+  - CLIP
+  # 协议 / 接口 / 工具
+  - API
+  - SDK
+  - CLI
+  - SQL
+  - MCP
+  # 硬件与平台
+  - GPU
+  - AWS
+  # 会议与基准
+  - ICML
+  - ICLR
+  - SWE-bench
+  # 技术词：中文语境已普遍直接使用
+  - token
+  - embedding
+  - prompt
+
+# ---------------------------------------------------------------------------
+# expand：缩写首次出现时展开
+# 格式：中文全称（English Full Name, ABBR)
+# 同一缩写全篇只展开一次，后文用中文或缩写，全篇保持一致
+# ---------------------------------------------------------------------------
+expand:
+  RLHF:
+    zh: 基于人类反馈的强化学习
+    en: Reinforcement Learning from Human Feedback
+    freq: 62
+  RL:
+    zh: 强化学习
+    en: Reinforcement Learning
+    freq: 364
+  RAG:
+    zh: 检索增强生成
+    en: Retrieval-Augmented Generation
+    freq: 435
+  MCP:
+    zh: 模型上下文协议
+    en: Model Context Protocol
+    freq: 202
+  LCEL:
+    zh: LangChain 表达式语言
+    en: LangChain Expression Language
+    freq: 62
+  QA:
+    zh: 问答
+    en: Question Answering
+    freq: 164
+  PII:
+    zh: 个人身份信息
+    en: Personally Identifiable Information
+    freq: 76
+  AUI:
+    zh: Anthropic AI 使用指数
+    en: Anthropic AI Usage Index
+    freq: 86
+  KL:
+    zh: KL 散度
+    en: Kullback-Leibler divergence
+    freq: 149
+    note: 数学符号保留 KL，只译后面的 divergence
+
+# ---------------------------------------------------------------------------
+# gloss：首现加「通俗括注」的译名
+# 形态：译名（English 原词，即 gloss）
+# 与 expand 的区别：expand 补的是「中英全称」（读者缺的是展开），gloss 补的是
+#   「人话解释」（读者缺的是概念本身）。全文只括注一次，后文一律只用译名。
+# 不是每个词都加 —— 读者一眼就懂的不加，加多了是噪音。是否加由本表逐条决定。
+#
+# 维护权限（三层）：
+#   执行 agent —— 只读 + 临机回报（遇到表里没有的词，自己定译法并在回执/
+#     「翻译说明」里报告），绝不直接改本文件（防各块自定标准造成漂移）
+#   主 agent —— **先行给出，默认生效**：汇总临机决定落盘（先 lexicon.md 临时，
+#     稳定后提升进这里永久），并在篇末「翻译说明」列出本篇新增/变更的词条。
+#     只有先给出用户才能反馈；用户没提 = 认可，不要等用户确认才落盘
+#   用户 —— 优先级最高，是否决制：对已生效条目一句话即覆盖/否决，立即生效
+# ---------------------------------------------------------------------------
+gloss:
+  human-in-the-loop:
+    zh: 人在回路
+    gloss: 即每个关键步骤由人工审批/介入
+  human-on-the-loop:
+    zh: 人在环上
+    gloss: 即人工监督运行、必要时接管
+
+# ---------------------------------------------------------------------------
+# translate：明确要翻成中文的词（避免译文里夹生英文）
+# ---------------------------------------------------------------------------
+translate:
+  agent: 智能体            # freq 8991 全语料最高频。2026-10-07 由 pending 提升：agent-frameworks 与 model-router 两轮 run 实测均统一译「智能体」，无歧义
+  context: 上下文          # freq 2242，context window -> 上下文窗口
+  context engineering: 上下文工程
+  harness: 编排层          # freq 613，指 agent 的外层调度框架
+  agentic: 智能体式
+  subagent: 子智能体       # freq 213
+  reasoning: 推理          # freq 708
+  inference: 推理          # freq 205，与 reasoning 区分时用「推断」
+  embedding model: 嵌入模型
+  retrieval: 检索          # freq 553
+  chunk: 分块              # freq 97
+  vector: 向量             # freq 699
+  trace: 追踪              # freq 539
+  traces: 追踪记录         # freq 801
+  evaluation: 评估         # freq 1006
+  evals: 评估              # freq 436，作名词时译「评估集」
+  benchmark: 基准测试      # freq 253
+  latency: 延迟            # freq 332
+  throughput: 吞吐量       # freq 28
+  guardrail: 护栏          # freq 6
+  checkpoint: 检查点       # freq 84
+  fine-tuning: 微调        # freq 307
+  tool: 工具               # freq 1760
+  tools: 工具              # freq 1764
+
+# ---------------------------------------------------------------------------
+# pending：高频但尚未拍板，暂按 fallback 处理
+# 这几条决定译文整体风格，拍板后从这里移到 keep / translate
+# ---------------------------------------------------------------------------
+pending:
+  - word: AI
+    freq: 5188
+    fallback: 保留 AI
+    note: >
+      「人工智能」是标准译法，但全文高频出现时「人工智能」明显啰嗦。
+      可选：全文保留 AI；或首次写「人工智能（AI）」后文用 AI。
+
+  - word: LLM
+    freq: 2364
+    fallback: 保留 LLM
+    note: >
+      中文有「大语言模型」「大模型」两种说法。
+      可选：保留 LLM；首次写「大语言模型（LLM）」后文用「大模型」。
+
+  - word: skill / skills
+    freq: 756           # 264 + 492
+    fallback: 技能
+    note: >
+      LangChain/Anthropic 语境里的 skill 是特定机制名（含 SKILL.md 的目录包）。
+      若指该机制，倾向保留 skill；若泛指能力，译「技能」。
+
+  - word: memory
+    freq: 1325
+    fallback: 记忆
+    note: >
+      泛指时译「记忆」；若指 agent 的 memory 机制（如 LangMem），倾向保留 memory。
+
+# ---------------------------------------------------------------------------
+# units：数字与单位，不换算
+# 语料实测：参数量只有符号写法（70B/7B/13B/32B），billion parameters 一次都没出现
+# ---------------------------------------------------------------------------
+units:
+  parameters:
+    rule: 保留符号，不换算成中文数量级
+    examples: [7B, 13B, 70B, 32B, 1.5B, 300B]
+    wrong_examples: ["70 亿", "十亿", "700 亿"]
+    note: 7B 就是 7B，不写「70 亿参数」
+  tokens:
+    rule: 保留符号，不换算
+    examples: [128K, 1M, 3.5T, 34.1T]
+    wrong_examples: ["12.8 万", "35 万亿"]
+  decimal:
+    rule: 数值本身不改；货币与日期按中文习惯，数值不变
