@@ -1,5 +1,5 @@
 ---
-name: autodl-instance-hunter
+name: autodl-rent-bot
 description: 在 AutoDL 上「把稀缺 GPU 实例弄到手并管好」的完整作业方法——零登录复用 Chrome 登录态、防封号的随机抖动与零点击轮询、实例盘点与开机复用、按型号优先级寻机、数据盘扩容与关机/开机生效、按 ID 指定关机，以及页面改版后的只读 DOM 回归诊断。核心是把「容易触发封号、容易误扣费」的动作交给人工闸门，把长时间等待做成对平台近乎零请求的低风险轮询。This skill should be used when 用户要求抢/租稀缺 GPU 机型（如 vGPU-48GB-350W）、轮询把已关机实例开机、查看或管理 AutoDL 容器实例、扩充数据盘、指定实例关机、排查「该主机GPU不足」弹窗、或 AutoDL 页面改版后需要重新核对选择器时。关键词：AutoDL、租机、抢卡、开机轮询、资源空闲标记、gpuTips、零登录、防封号、数据盘扩容、克隆实例、无卡模式开机。注意：机器已到手后要 SSH 进去拉代码/下模型/跑服务，请用同仓库的 autodl-remote-shell skill，两者是上下游关系。
 agent_created: true
 ---
