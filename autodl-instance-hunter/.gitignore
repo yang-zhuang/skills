@@ -1,0 +1,39 @@
+# 敏感配置与登录态：绝对不能进公开仓库
+.env
+.env.local
+.env.*
+!.env.example
+chrome_profile/
+autodl_cookies*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
+# 运行时产物：日志、截图、DOM 快照、实例元数据（可能含真实实例 ID）
+*.log
+logs/
+screenshots/
+instances_log.json
+*_full.html
+market_*.json
+market_*.html
+instance_cards.json
+expand_dropdown.html
+*.png
+
+# 诊断导出的页面快照
+inspect_*.html
+create_page_full.html
+instance_full.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
