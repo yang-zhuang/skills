@@ -33,7 +33,7 @@
 | ComfyUI 版本 | `git describe --tags --exact-match HEAD` | `git rev-parse HEAD` + `git log -1`；`/system_stats` 的 `comfyui_version`；镜像说明里的版本号交叉验证 | 仓库无 tag，或运行时版本与源码版本不一致时 |
 | 工作区是否被改过 | `git status --short` + `git diff --stat` | 对比 `/system_stats` 与源码 tag；`git stash list`；直接读 `middleware/` 与 `server.py` 关键段落 | 镜像行为与上游版本对不上时（如 `/object_info` 缓存、额外 gzip） |
 | 依赖来源与范围 | `pip freeze` | `pip list --format=freeze`；`conda list --explicit`；镜像自带的 `requirements*.txt` / `environment*.yml` | `pip freeze` 含大量 `file://` 行，或要区分直接依赖与传递依赖时 |
-| 启动命令 | `ps -ef` 看 cmdline | 读 supervisor 配置；`tr '\0' ' ' < /proc/<PID>/cmdline`；容器/面板启动脚本 | 进程名看不出完整参数，或启动后被父进程改写时 |
+| 启动命令 | `ps -ef` 看 cmdline | `tr '\0' ' ' < /proc/<PID>/cmdline`；容器/面板启动脚本；**SSH 不通时用 `/api/comfy/proxy/system_stats` 的 `system.argv`**（返回完整 argv 数组） | 进程名看不出完整参数、启动后被父进程改写，或根本连不上 SSH 时 |
 | 模型实际搜索路径 | `find /root/ComfyUI/models -name '<文件>'` | `cat /root/ComfyUI/extra_model_paths.yaml`；`grep -n 'models' folder_paths.py`；API `/object_info` 里的模型枚举值 | 模型不在默认目录，或工作流引用了外部路径时 |
 
 ## 还原顺序（一条路，不搞参数切换）

@@ -175,7 +175,8 @@ curl -s http://127.0.0.1:<端口>/queue
 | 层 | 谁提供 | 端点形态 | 什么时候用 |
 |---|---|---|---|
 | 作者封装 API | 镜像作者 | `/api/workflow/generate`、`/api/workflow/result?prompt_id=...`、`/api/comfy/start`、`/api/gpu/info`、并发 `/api/concurrent/*` 等；基址是面板 6008 外网 8443 | **优先**。一步提交工作流名+参数、自动取结果、能做多机并发批量；不需要自己拼节点图 |
-| 原生框架 API | ComfyUI | `POST /prompt`、`/history/<id>`、`/view`；基址是 127.0.0.1:6006 | 要做单变量 A/B、节点级控制、或作者 API 不够用时 |
+| **面板代理的原生 API** | 镜像作者的面板 | 面板外网基址 + `/api/comfy/proxy/prompt`、`/api/comfy/proxy/history?prompt_id=`、`/api/comfy/proxy/queue`、`/api/comfy/proxy/system_stats` | **SSH 不通时的主路**：面板把只监听 127.0.0.1 的 ComfyUI API 转发到公网；提交格式同原生 `{"prompt": ..., "client_id": ...}`，可跑完整 A/B |
+| 原生框架 API | ComfyUI | `POST /prompt`、`/history/<id>`、`/view`；基址是 127.0.0.1:6006 | 要做单变量 A/B、节点级控制、或作者 API 不够用时；须在实例内或 SSH 隧道里 |
 
 判定动作：先看作者 API 说明里的章节标题和端点清单（`grep -oE '<h[1-4][^>]*>[^<]{2,80}</h[1-4]>'`），
 确认有没有一步提交/取结果的封装。**有就先用封装的**；原生接口留作精细控制。
@@ -184,6 +185,19 @@ curl -s http://127.0.0.1:<端口>/queue
 `curl -s -m 10 http://127.0.0.1:<面板端口>/api/gpu/info`、`/api/comfy/status` 等，
 看返回是不是合法 JSON / 有真实字段。写报告的证据等级 distinction：只读到文档 = 源码级；
 实调返回 200 且有数据 = 实测级。两者不可混写。
+
+**SSH 不通时怎么找到 API 代理（本轮实测的关键路径）**：
+1. 面板是 React SPA 时，入口 URL 不在 HTML 里——先抓 HTML 里的 `<script src="/assets/index-*.js">`，
+   再从 JS bundle 里正则抽端点：
+   `re.findall(r'["\'`](/(?:api|comfy)/[A-Za-z0-9_/?=&.\-]+)', js)`。本轮从 180 KB 的 bundle 抽出 48 个端点。
+2. 重点找 `/api/comfy/proxy/*` 前缀——这是作者把 127.0.0.1 的原生 API 转发到公网的后门；
+   同时找 `/api/workflows/files` 和 `/api/workflows/download/<name>`，可把预置工作流拉到本地做参数对比。
+3. 逐个 GET 验证代理端点：`/api/comfy/proxy/queue`、`/history`、`/system_stats` 返回 200 即通路可用。
+   **提交格式的权威来源是 JS bundle**：搜 `proxy/prompt` 附近代码，本轮确认 body 是
+   `{"prompt": <工作流>, "client_id": <uuid>}`。
+4. 404 要先分清是端点不存在还是**方法错**（GET 调了 POST 端点）：看 bundle 里的 `method:"POST"` 再下结论。
+5. 显存峰值可从 `/api/comfy/proxy/system_stats` 的 `devices[i].vram_total - vram_free` 每秒采样得到，
+   不必依赖 SSH 的 `nvidia-smi`——这是 SSH 不通时采显存的替代路径。
 
 ### 原生接口提交格式（最容易踩的坑）
 
