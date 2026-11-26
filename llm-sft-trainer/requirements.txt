@@ -1,0 +1,9 @@
+# 技能自身运行环境（只跑爬虫，很轻）
+requests>=2.31
+
+# 注意：以下依赖 **不装进技能环境**，而是装到每个训练任务自己的工作目录。
+# 原因：torch/CUDA/trl/unsloth 版本敏感且体积大，混在一起会互相污染。
+#   pip install torch transformers datasets peft accelerate bitsandbytes
+#   pip install trl            # 或 unsloth / ms-swift
+#   pip install vllm           # 需要验证部署时再装
+# 详见 references/01_probe.md「两套环境」。

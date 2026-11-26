@@ -1,0 +1,14 @@
+# 运行时下载的文档，绝不入库（技能包只带脚本，不带文档）
+docs/
+# 下载的模型权重
+models/
+# 技能自身的 Python 环境
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+# 训练产物
+outputs/
+*.log
+# 自测跑出来的回答与轨迹（运行时产物，不入库）
+scripts/selftest-out/

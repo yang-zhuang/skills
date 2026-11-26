@@ -1,0 +1,737 @@
+{
+  "version": 4,
+  "note": "【这是缓存，不是真理】本文件是某次按 06_docs_nav.md 的心法四层跑出来的结果快照，作用是省你重跑，不是替代方法。心法才是源：定性(A有没有/B怎么配/C值多少/D怎么搭) → 认骨架(该去哪章) → 进页(骨架够细就挑节，太粗就按名字grep) → 证据分级。缓存过期时（--recipes 出 MISS）按心法重跑，只改 match，不要重写结构。每个决策点列 trl / unsloth / swift 三库各自的对应页，并给 compare（最简 / 最强 / 怎么组合 / 禁忌）。match 是标题子串，in_path 用于同名标题消歧；真实路径由 docs_outline.py --recipes 按当前 manifest 现算。某库确实没有对应页时用 no_page 说明原因（可选 see 给退路）——不要硬凑一篇，也不要漏掉另外两个库。",
+  "recipes": [
+    {
+      "id": "vram",
+      "step": 3,
+      "question": "显存不够 / OOM，要把显存压下来",
+      "by_lib": {
+        "trl": {
+          "match": "Reducing Memory Usage",
+          "role": "开关清单：截断、packing、PEFT/4bit、padding-free、激活卸载、缓存分配器、梯度检查点。先按这张表逐项关，再谈换方法"
+        },
+        "unsloth": {
+          "match": "500K Context Length Fine-tuning",
+          "role": "极端场景的实测组合：loss 分块、梯度检查点增强、Tiled MLP 怎么一起上，看单卡塞 500k 的真实代价"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "swift 没写省显存专页，开关散在参数表：「Seq2SeqTrainer参数」（gradient_checkpointing / per_device_train_batch_size / max_length）+「量化参数」（quant_method bnb/hqq/eetq/fp8）"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "trl",
+          "text": "全是配置项，不动代码结构；按它那张表从上往下关，通常第一步就够了"
+        },
+        "strongest": {
+          "lib": "unsloth",
+          "text": "Tiled MLP + 4bit + 检查点增强，能把 500k 压进单卡；代价是绑定 unsloth 支持的模型列表"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "trl"
+          ],
+          "text": "省显存交给 unsloth（FastLanguageModel 加载 + 打补丁），训练控制交给 trl（SFTTrainer）——这正是 trl 官方 unsloth_integration 的写法"
+        },
+        "avoid": "别把 swift CLI 和 unsloth patch 塞进同一个进程；两个框架各自改全局行为，混用报错很难定位"
+      },
+      "verify": "照抄配置跑 30 步 smoke test，用 torch.cuda.max_memory_allocated() 和你的基线比，别拿文档标称值当结论"
+    },
+    {
+      "id": "long-context",
+      "step": 3,
+      "question": "想把上下文拉到 32k / 64k / 更长",
+      "by_lib": {
+        "trl": {
+          "match": "Training Beyond 1M Tokens",
+          "role": "原理最全的一篇：loss 先崩 → logits 分块 → 位置用 YaRN 重标定 → 激活卸载 → 序列切到多卡。长上下文为什么会崩，看它"
+        },
+        "unsloth": {
+          "match": "500K Context Length Fine-tuning",
+          "role": "工程实现视角：Tiled MLP + 检查点增强怎么把 500k 跑起来，附实测数字"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "swift 侧就两个旋钮：--tuner_type longlora + --max_length（数据参数节还讲了超长样本是截断还是丢弃）。位置缩放/序列并行没有专页，原理回 trl 那篇补"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "一条 --tuner_type longlora + --max_length，改两个值就能试；但只是 LoRA 层面的延展，不是真长上下文训练"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "YaRN + logits 分块 + 序列并行，能真的把 1M 跑起来；改造成本最高"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "unsloth"
+          ],
+          "text": "原理和位置缩放照 trl，显存用 unsloth 的 Tiled MLP 压；先小步试 32k，再按阶梯往上推"
+        },
+        "avoid": "不要只改 max_length 就以为拉长了上下文——不重标定位置（YaRN 类），模型在超过训练长度的位置上是瞎猜"
+      },
+      "verify": "按 02_decide.md 的阶梯实测上限（10k 起、粗扫定位再 +500 细调），同时记录峰值显存和 tokens/s"
+    },
+    {
+      "id": "packing",
+      "step": 3,
+      "question": "训练太慢 / 想提高吞吐",
+      "by_lib": {
+        "trl": {
+          "match": "Reducing Memory Usage",
+          "role": "「## Packing」和「## Padding-free」两节：packing 省的是什么、padding-free 什么时候更合适"
+        },
+        "unsloth": {
+          "match": "3x Faster LLM Training with Unsloth Kernels + Packing",
+          "role": "3x 提速的来源拆解（kernel + packing），以及什么情况下不该开（跨样本污染）"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "--packing 的开关，以及和 padding_free 的取舍：padding_free 不用预处理但 packing 更快、显存更稳；还有它与 cached_dataset、truncation_strategy 的配合"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "一个 --packing true 就够，连数据集缓存一起管了"
+        },
+        "strongest": {
+          "lib": "unsloth",
+          "text": "kernel + packing 一起上才有 3x；单开 packing 只是省 padding"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "trl"
+          ],
+          "text": "用 unsloth 的 kernel 提速 + trl SFTTrainer 的 packing/padding-free 开关；两者叠加是官方推荐组合"
+        },
+        "avoid": "packing 后必须确认 attention 没有跨样本串味；对话数据尤其要检查 label mask"
+      },
+      "verify": "开/关各跑 50 步，比 tokens/s 和 eval loss；packing 后 decode 一条样本看是否跨界"
+    },
+    {
+      "id": "lora-hp",
+      "step": 3,
+      "question": "LoRA 的 r / alpha / target_modules 怎么设",
+      "by_lib": {
+        "trl": {
+          "match": "LoRA Without Regret",
+          "role": "实验结论式的选参（哪些设置会让 LoRA 白训），不是拍脑袋的经验值"
+        },
+        "unsloth": {
+          "match": "LoRA fine-tuning Hyperparameters Guide",
+          "role": "逐个超参给范围和判据，含 r/alpha 的常见组合"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "「Tuner参数」→「LoRA」小节：lora_rank=8、lora_alpha=32、lora_dropout=0.05、use_dora、use_rslora、lorap_lr_ratio，默认值以它为准"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "默认 rank 8 / alpha 32 先跑通，别一上来调参"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "LoRA Without Regret 给的是实验结论（哪些配置等价于白训），比经验值可靠"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "unsloth"
+          ],
+          "text": "用 trl 的结论定 target_modules 和学习率，用 unsloth 的 guide 定 r/alpha 与 dropout；swift 的默认值只作参考"
+        },
+        "avoid": "target_modules 只加 q_proj/v_proj 是常见白训原因；三库文档都建议覆盖 q/k/v/o + MLP"
+      },
+      "verify": "固定其它变量只改 r（16 / 32 / 64），比 eval loss 和峰值显存，三档结果写进方案"
+    },
+    {
+      "id": "full-vs-lora",
+      "step": 3,
+      "question": "全参还是 LoRA / QLoRA，怎么切",
+      "by_lib": {
+        "trl": {
+          "match": "PEFT",
+          "role": "trl 里 peft 怎么接、全参和 LoRA 怎么切换（SFTConfig + PeftConfig 的写法差异）"
+        },
+        "unsloth": {
+          "match": "Is Fine-tuning Right For Me",
+          "role": "这篇 FAQ 里「LoRA vs. QLoRA: Which One to Use?」一节直接回答两者怎么选，含显存与精度的取舍"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "一个 --tuner_type 就切：lora / full / longlora / adalora…；注意「训练参数」里学习率默认值全参 1e-5、LoRA 1e-4，换方法不换 lr 会直接训坏"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "--tuner_type lora|full 一个参数切换，其余不动"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "trl + peft 能精确控制哪些层、哪些参数、怎么存；自定义需求只有这条路顺"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "trl"
+          ],
+          "text": "全参放不下时的默认路径：unsloth 的 FastLanguageModel.get_peft_model（4bit 加载 + LoRA）+ trl SFTTrainer，显存最省且仍是标准 HF 权重"
+        },
+        "avoid": "切换全参/LoRA 时学习率必须跟着改（默认值差 10 倍）；QLoRA 的 4bit 只省训练显存，部署仍要 bf16 基座 + adapter"
+      },
+      "verify": "先按 02_decide.md 三档算显存，再用选中的那条跑 smoke test；换 tuner_type 时同步改 learning_rate"
+    },
+    {
+      "id": "multi-gpu",
+      "step": 3,
+      "question": "多卡怎么跑 / 显存还差一点想上 ZeRO",
+      "by_lib": {
+        "trl": {
+          "match": "DeepSpeed",
+          "role": "trl 接 DeepSpeed 的配置与 ZeRO stage 怎么选"
+        },
+        "unsloth": {
+          "match": "Multi-GPU Fine-tuning with Distributed Data Parallel (DDP)",
+          "role": "DDP 的最小可用配置和启动命令，先确认它默认走的是 DDP 不是 ZeRO"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "--deepspeed 的取值（zero0/1/2/3）和 deepspeed_autotp_size；「训练参数」节还有 save_only_model 这类省时省盘的开关"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "--deepspeed zero2 一个参数，脚本不用改"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "trl + DeepSpeed 配置文件，ZeRO stage / offload / 分片策略都能调"
+        },
+        "combine": {
+          "libs": [
+            "swift",
+            "unsloth"
+          ],
+          "text": "多卡 + LoRA 小模型用 unsloth DDP 最省事；要 ZeRO-3 分片大模型，swift 的 --deepspeed 更省配置"
+        },
+        "avoid": "DDP 只是数据并行，不切分权重；指望它解决单卡放不下模型是误解（那是 ZeRO-3 / TP 的事）"
+      },
+      "verify": "nvidia-smi 看每张卡都有占用，日志里 world_size 对得上；ZeRO-2 不够再上 3"
+    },
+    {
+      "id": "combine",
+      "step": 5,
+      "question": "想把三库组合起来用：谁负责什么",
+      "by_lib": {
+        "trl": {
+          "match": "Unsloth",
+          "in_path": "04_integrations/",
+          "role": "官方写的组合方式：unsloth 的 FastLanguageModel 加载 + trl 的 SFTTrainer，一段完整代码直接可抄"
+        },
+        "unsloth": {
+          "match": "Fine-tuning for Beginners",
+          "role": "FastLanguageModel.from_pretrained / get_peft_model 的用法，组合时的加载侧就是它"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "「基本参数」里的 --tuner_backend peft|unsloth：一行开关就把 unsloth 当后端用，不用自己拼代码"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "--tuner_backend unsloth 一行，白拿 unsloth 的省显存；其余仍是 swift 的参数体系"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "FastLanguageModel + SFTTrainer：加载/内核/训练/回调/日志都能自己控，是组合的上限"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "trl"
+          ],
+          "text": "分工：unsloth 管加载、4bit、kernel、LoRA 挂载；trl 管 trainer、回调、checkpoint、日志。swift 是整包替代方案，用于要多模态/国产卡/一条命令时"
+        },
+        "avoid": "swift 用 unsloth 后端时 --target_modules 不能写 all-linear（unsloth 不展开模块名，会 assert 失败），必须写 q_proj k_proj v_proj 这类具体名；详见 swift FAQ Q50"
+      },
+      "verify": "组合方案跑通后，确认保存出来的仍是标准 HF 权重（能直接被 transformers/vLLM 加载），不是框架私有格式"
+    },
+    {
+      "id": "dataset-format",
+      "step": 4,
+      "question": "数据该摆成什么格式",
+      "by_lib": {
+        "trl": {
+          "match": "Dataset Formats",
+          "role": "standard / conversational / prompt-completion 三种格式逐一对照，这里错一步后面全错"
+        },
+        "unsloth": {
+          "match": "Datasets Guide",
+          "role": "Alpaca / ShareGPT / ChatML 的具体字段要求，以及怎么换成 conversational"
+        },
+        "swift": {
+          "match": "自定义数据集",
+          "role": "swift 的 jsonl schema 和注册方式；还可以对「支持的模型和数据集」确认你的数据集是否已内置"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "内置数据集直接写名字就能用；自定义也只是 jsonl 一个文件 + 注册"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "三种格式定义最严格，能精确控制哪些 token 算 loss（label mask）"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "unsloth",
+            "swift"
+          ],
+          "text": "用 trl 的 conversational 格式当中间格式：swift 和 unsloth 都能吃，转换只需一层映射，不用为每个库各存一份"
+        },
+        "avoid": "别按库各做一份数据；三份数据一改就不同步，最后训练结果对不上"
+      },
+      "verify": "转完用 check_dataset.py 复检格式识别结果和 token 分布，再开训"
+    },
+    {
+      "id": "chat-template",
+      "step": 4,
+      "question": "chat template 怎么套、训练和推理不一致怎么办",
+      "by_lib": {
+        "trl": {
+          "match": "Chat Templates",
+          "role": "template 的作用和最经典的两种错：训练套了推理没套、或者套了两次"
+        },
+        "unsloth": {
+          "match": "Chat Templates",
+          "role": "unsloth 侧怎么取 tokenizer 的 template、怎么自定义"
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "「模板参数」一节：--template 怎么指定、内置模板从哪查；模板不对是 swift 最常见的错"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "--template 写名字，内置模板不用自己拼"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "能精确到 token 级校验，训练/推理不一致的问题只有它能查清"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "unsloth"
+          ],
+          "text": "三库都用同一个 tokenizer 自带的 template；用 trl 那篇的方法 decode 校验，再拿去 swift/unsloth 复用"
+        },
+        "avoid": "自己手拼 template 是最高频的翻车点；训练和推理必须同一套，且只套一次"
+      },
+      "verify": "训练前 decode 一条样本，确认特殊 token 位置对；再和推理侧用同一套 template 各跑一次"
+    },
+    {
+      "id": "quickstart",
+      "step": 5,
+      "question": "最小可跑的训练脚本长什么样",
+      "by_lib": {
+        "trl": {
+          "match": "Quickstart",
+          "role": "当前版本 SFTTrainer/SFTConfig 的标准写法，参数名以它为准"
+        },
+        "unsloth": {
+          "match": "Fine-tuning for Beginners",
+          "role": "从 FastLanguageModel 加载到训练到保存的最短路径"
+        },
+        "swift": {
+          "match": "快速开始",
+          "in_path": "GetStarted/",
+          "role": "swift 一条命令跑通 SFT 的最小命令，先跑通再改参数"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "一条命令，连数据、模板、训练配置都给了"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "代码完全可控，后续加自定义 loss、callback、评测都在这套里做"
+        },
+        "combine": {
+          "libs": [
+            "swift",
+            "trl"
+          ],
+          "text": "两步走：先用 swift 一条命令确认数据和环境没问题，再用 trl 写正式脚本；别拿 swift 的跑通当训练脚本验收"
+        },
+        "avoid": "直接抄 quickstart 开全量训练是常见浪费——先 30 步 smoke test 看 loss 和显存"
+      },
+      "verify": "原样跑通 30 步，确认 loss 在降、checkpoint 能存能读，再往里加数据"
+    },
+    {
+      "id": "trainer-api",
+      "step": 5,
+      "question": "参数名到底叫什么（各库 API / CLI 对照）",
+      "by_lib": {
+        "trl": {
+          "match": "SFT",
+          "in_path": "02_trainers/sft_trainer",
+          "role": "SFTTrainer 与 SFTConfig 的全部字段说明，脚本里每个参数回这里核对"
+        },
+        "unsloth": {
+          "no_page": "unsloth 没有 trl 那样的 CLI，参数全在 Python 调用里（FastLanguageModel + SFTTrainer）",
+          "see": {
+            "match": "Fine-tuning for Beginners"
+          }
+        },
+        "swift": {
+          "match": "命令行参数",
+          "in_path": "Instruction/",
+          "role": "985 行的中文参数总表，按「基本参数 / 原子参数 / 集成参数」分区，--help 里找不到解释就查它"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "中文参数表 + --help，查名字最快"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "SFTConfig 是这套参数的事实标准（unsloth 也复用它），冲突时以它为准"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "swift"
+          ],
+          "text": "写代码时参数名以 trl 为准；换成 swift CLI 时按参数表映射，不要假设同名同义（max_length 在三库都指 token，但默认值不同）"
+        },
+        "avoid": "三库同名参数默认值不一样（max_length / learning_rate / lora_alpha），照搬会静默改变训练行为"
+      },
+      "verify": "写完脚本逐参数对一遍：名字、默认值、单位（尤其 max_length 是 token 不是字符）"
+    },
+    {
+      "id": "lora-pitfall",
+      "step": 6,
+      "question": "训完了但效果不如预期 / 怕白训",
+      "by_lib": {
+        "trl": {
+          "match": "LoRA Without Regret",
+          "role": "官方点名哪些设置会让 LoRA 白训，先对照 target_modules / lr / epoch 三项"
+        },
+        "unsloth": {
+          "match": "Troubleshooting & FAQs",
+          "role": "OOM、loss 不降、输出乱码这类现象的排查顺序"
+        },
+        "swift": {
+          "match": "常见问题整理",
+          "role": "中文 FAQ，覆盖模板错、数据格式错、显存相关的高频坑"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "unsloth",
+          "text": "按现象查，最快定位到是 OOM 还是配置错"
+        },
+        "strongest": {
+          "lib": "trl",
+          "text": "讲的是根因（哪些设置等价于没训），不是现象"
+        },
+        "combine": {
+          "libs": [
+            "trl",
+            "unsloth",
+            "swift"
+          ],
+          "text": "先用 trl 对照三项根因，再按现象在 unsloth / swift FAQ 里找具体报错；三者互补，不重复"
+        },
+        "avoid": "loss 不降就加 epoch 是最常见的错——先确认数据 label mask 和 template 对，再谈轮次"
+      },
+      "verify": "先固定探针集跑 base 和 tuned 对比；再回看 loss 曲线和样本，别急着调超参"
+    },
+    {
+      "id": "eval",
+      "step": 7,
+      "question": "怎么评训练效果",
+      "by_lib": {
+        "trl": {
+          "no_page": "trl 没有评测专页（它只管训练），评测口径看 swift 那篇 + 自己的探针集"
+        },
+        "unsloth": {
+          "no_page": "unsloth 只有自家模型的 benchmark（Unsloth Benchmarks），不是评你训出来的模型"
+        },
+        "swift": {
+          "match": "评测",
+          "role": "评测流程和指标口径，支持接 evalscope 等后端；三库里唯一有评测专章的"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "自带评测命令，配好数据集就能出分"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "三库里只有它有成体系的评测；trl/unsloth 都得自己搭"
+        },
+        "combine": {
+          "libs": [
+            "swift",
+            "unsloth"
+          ],
+          "text": "客观指标用 swift 的评测跑；人工对比用 20~50 条探针集（unsloth 的 troubleshooting 里有对比方法）。两套都要，缺一套会误判"
+        },
+        "avoid": "只看 loss 或只看一个 benchmark 分数；SFT 常见是分数涨了但风格跑偏，必须人看样本"
+      },
+      "verify": "固定 20~50 条探针样本，base 与 tuned 同口径对比，结果写进 eval_report.md"
+    },
+    {
+      "id": "vllm",
+      "step": 7,
+      "question": "训完怎么用 vLLM 部署",
+      "by_lib": {
+        "trl": {
+          "no_page": "注意：trl 的 vLLM 页讲的是训练中用 vLLM 加速生成（GRPO 那类在线方法），不是部署 adapter；别拿它当部署文档",
+          "see": {
+            "match": "vLLM"
+          }
+        },
+        "unsloth": {
+          "match": "vLLM Deployment & Inference Guide",
+          "role": "从 adapter 到 vLLM 服务的完整路径，含 engine 参数和 LoRA 挂载"
+        },
+        "swift": {
+          "match": "推理和部署",
+          "role": "swift 训完怎么起推理服务（vLLM / SGLang / LMDeploy 都在参数表里有对应节）"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "unsloth",
+          "text": "从 merge 到起服务一条龙，命令直接能抄"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "vLLM / SGLang / LMDeploy 三种后端都能切，批量服务场景更完整"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "swift"
+          ],
+          "text": "单模型快速上线用 unsloth 的路径；要多后端/多 adapter/国产卡，用 swift 的部署参数"
+        },
+        "avoid": "别用 trl 那篇 vLLM 文档指导部署——它解决的是训练时的生成加速，两件事"
+      },
+      "verify": "按 05_verify.md 四项实测：起服务、/v1/models、发请求、确认 base 与 adapter 输出确实不同"
+    },
+    {
+      "id": "export-merge",
+      "step": 7,
+      "question": "adapter 怎么合并 / 导出成整模型",
+      "by_lib": {
+        "trl": {
+          "match": "MergeModelCallback",
+          "role": "训练中/训练后自动 merge 的回调，实验性功能，注意版本"
+        },
+        "unsloth": {
+          "match": "Saving to GGUF",
+          "role": "除了 merge 到 16bit，还讲了转 GGUF 给 llama.cpp 用；merge 写法见 vLLM guide"
+        },
+        "swift": {
+          "match": "导出与推送",
+          "role": "「导出参数」里的 merge_lora（支持 lora / llamapro / longlora）+ 推送前的大小检查"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "--merge_lora true 一条命令，顺带能推模型库"
+        },
+        "strongest": {
+          "lib": "unsloth",
+          "text": "merge 之外还能转 GGUF / 量化，端侧和 llama.cpp 场景只有它覆盖"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "swift"
+          ],
+          "text": "服务端要 bf16 整模型用 swift 导出；要上端侧或 llama.cpp 用 unsloth 转 GGUF"
+        },
+        "avoid": "merge 后原 adapter 别删，后续微调/回滚还要用；注意 merge 会丢失 adapter 的可拆卸性"
+      },
+      "verify": "merge 后加载一次做推理，和 adapter 模式的输出对齐；记录文件体积变化"
+    },
+    {
+      "id": "hardware-npu",
+      "step": 7,
+      "question": "昇腾 / 国产卡怎么跑",
+      "by_lib": {
+        "trl": {
+          "no_page": "trl 没有国产卡适配文档"
+        },
+        "unsloth": {
+          "no_page": "unsloth 只覆盖 NVIDIA / AMD，没有 NPU 路径"
+        },
+        "swift": {
+          "match": "NPU支持",
+          "role": "三库里唯一覆盖国产卡的：「BestPractices/NPU支持」+「Megatron-SWIFT/Ascend」，含 MUSA / Metax 等其它国产卡"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "swift",
+          "text": "只有它支持，没得选"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "同上；国产卡场景直接锁死 swift，不要浪费时间试别的"
+        },
+        "combine": {
+          "libs": [],
+          "text": "无法组合：trl/unsloth 在 NPU 上没有可用路径"
+        },
+        "avoid": "别在昇腾上硬装 unsloth/triton kernel，编译不过且没人维护"
+      },
+      "verify": "先跑通最小 SFT，再谈长上下文；probe_env.py 确认卡型被识别"
+    },
+    {
+      "id": "hardware-amd",
+      "step": 7,
+      "question": "AMD 卡怎么跑",
+      "by_lib": {
+        "trl": {
+          "match": "Training on AMD GPUs",
+          "role": "trl 在 ROCm 上的启动方式与已知限制"
+        },
+        "unsloth": {
+          "match": "Fine-tuning LLMs on AMD GPUs",
+          "role": "unsloth 的 AMD 安装与支持矩阵"
+        },
+        "swift": {
+          "match": "AMD GPU 支持",
+          "role": "swift 的 AMD 支持范围和参数差异"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "unsloth",
+          "text": "安装指引最细（ROCm 版本、驱动、容器），照抄成功率高"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "模型覆盖最广，冷门模型在 AMD 上更容易跑起来"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "trl"
+          ],
+          "text": "AMD 上仍可用 FastLanguageModel + SFTTrainer，前提是按 unsloth 的 ROCm 安装页把环境配对"
+        },
+        "avoid": "AMD 上 kernel 覆盖不如 NVIDIA，别假设 unsloth 的所有加速都可用；先看支持矩阵"
+      },
+      "verify": "probe_env.py 确认 ROCm 版本被识别，跑 30 步 smoke test"
+    },
+    {
+      "id": "vision",
+      "step": 7,
+      "question": "多模态 / 视觉微调",
+      "by_lib": {
+        "trl": {
+          "no_page": "trl 没有视觉微调专页（SFTTrainer 能跑，但没有视觉数据格式说明）"
+        },
+        "unsloth": {
+          "match": "Vision Fine-tuning",
+          "role": "视觉微调的数据格式和训练入口"
+        },
+        "swift": {
+          "match": "Qwen3-VL最佳实践",
+          "role": "具体模型的最佳实践；通用入口看「快速训练VL模型」"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "unsloth",
+          "text": "视觉数据格式和训练入口一篇讲完"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "按模型给最佳实践（Qwen3-VL / InternVL / MiniCPM 等），覆盖最广"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "swift"
+          ],
+          "text": "单模型快速试 -> unsloth；要多模型横评或国产多模态 -> swift"
+        },
+        "avoid": "视觉塔的显存常被忽略；先确认 freeze_vit 策略再算显存"
+      },
+      "verify": "先确认显存放得下视觉塔，再用 3 条样本跑通前向"
+    },
+    {
+      "id": "qat",
+      "step": 7,
+      "question": "量化感知训练（训练时就补偿量化误差）",
+      "by_lib": {
+        "trl": {
+          "no_page": "trl 没有 QAT 路径"
+        },
+        "unsloth": {
+          "match": "Quantization-Aware Training (QAT)",
+          "role": "训练阶段就补偿量化误差，和训完再量化是两回事"
+        },
+        "swift": {
+          "match": "EntroPack 灵活量化最佳实践",
+          "role": "swift 的灵活量化方案（quant_method=entropack + entropack_target_bpp）"
+        }
+      },
+      "compare": {
+        "simplest": {
+          "lib": "unsloth",
+          "text": "QAT 流程封装好，按 notebook 走即可"
+        },
+        "strongest": {
+          "lib": "swift",
+          "text": "EntroPack 能按目标 bpp 压，参数更细，适合有明确体积预算的场景"
+        },
+        "combine": {
+          "libs": [
+            "unsloth",
+            "swift"
+          ],
+          "text": "先按 unsloth 的 QAT 建立基线，再用 swift 的 entropack 试更低 bpp；两者对比取性价比高的"
+        },
+        "avoid": "QAT 不能救回训练本身没学好的模型；先保证 SFT 效果，再谈量化补偿"
+      },
+      "verify": "对比 QAT 模型与普通量化模型在同一探针集上的分差，别只看文件大小"
+    }
+  ]
+}

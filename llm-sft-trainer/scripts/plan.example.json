@@ -1,0 +1,51 @@
+{
+  "_readme": "示例文件。vram_mib / s_per_step 是本机 RTX 5060 8G 的真实实测（sft-case，seq=1024）；quality 是占位值，用时必须换成你自己探针集的分数。measured=false 的点是估算，图上画成空心。",
+  "title": "Qwen3.5-2B SFT 选型：显存 vs 时长（示例）",
+  "dataset_size": 10000,
+  "steps_per_epoch": 2500,
+  "epochs": 3,
+  "baseline_quality": 0.333,
+  "constraints": {
+    "max_vram_mib": 7899,
+    "max_hours": 8.0,
+    "min_quality": 0.85
+  },
+  "points": [
+    {
+      "name": "LoRA 2B bf16",
+      "vram_mib": 4566,
+      "s_per_step": 3.2,
+      "quality": 0.87,
+      "measured": true,
+      "note": "基准 1.0x"
+    },
+    {
+      "name": "QLoRA 2B 4bit",
+      "vram_mib": 3220,
+      "s_per_step": 3.68,
+      "quality": 0.865,
+      "measured": true,
+      "note": "买显存付时间"
+    },
+    {
+      "name": "QLoRA 7B 4bit",
+      "vram_mib": 6000,
+      "s_per_step": 12.9,
+      "quality": 0.895,
+      "measured": false
+    },
+    {
+      "name": "LoRA 7B bf16",
+      "vram_mib": 17000,
+      "s_per_step": 11.2,
+      "quality": 0.9,
+      "measured": false
+    }
+  ],
+  "excluded": [
+    {
+      "name": "全参 7B",
+      "reason": "约 112 GB，24G 卡物理上装不进"
+    }
+  ]
+}

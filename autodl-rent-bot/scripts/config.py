@@ -62,6 +62,24 @@ GPU_COUNT = int(os.getenv("AUTODL_GPU_COUNT", "1").strip() or "1")
 BILLING_MODE = os.getenv("AUTODL_BILLING_MODE", "按量计费").strip()
 FRAMEWORK = os.getenv("AUTODL_FRAMEWORK", "PyTorch").strip()
 
+# 创建时数据盘目标容量（GB，指扩容后的**总容量**，含免费 50GB）。0 = 创建时不扩容。
+# 设置后有两处联动（缺一不可）：
+#   1) 市场选机器：数据盘 + 可扩容 < 目标的机器直接跳过（有些主机可扩容为 0GB，
+#      抢到也设不到目标容量，纯属浪费一个运行名额还花冤枉钱）；
+#   2) 创建页：自动勾选「需要扩容」并把容量设到目标值。
+DATA_DISK_TARGET_GB = int(os.getenv("AUTODL_DATA_DISK_GB", "0").strip() or "0")
+
+# 指定实例 ID 列表（逗号分隔，可一台或多台）。非空时走"指定实例管理"流程：
+#   逐台检查——运行中 -> 跳过；已关机 -> 尝试开机；开机失败（主机无空闲 GPU）
+#   的名额转去算力市场抢新机。名额仍受 MAX_RUNNING_INSTANCES 约束
+#   （设 1 则开满 1 台即停，即使还有别的指定实例闲着也不开）。
+# 此模式优先于 REUSE_INSTANCES：显式指定了实例 ID 就是明确意图，不再受开关约束。
+INSTANCE_IDS = [
+    s.strip()
+    for s in os.getenv("AUTODL_INSTANCE_IDS", "").split(",")
+    if s.strip()
+]
+
 # 同时处于开机/运行状态的实例上限（含已有运行中 + 新开机 + 新租用）。
 # 出租新机/开机前先盘点 /console/instance/list：
 #   运行中已达上限 -> 什么都不做；

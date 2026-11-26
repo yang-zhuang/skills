@@ -422,6 +422,20 @@ def collect_rentable_machines(page: Page, model: str) -> list:
         spec = parse_machine_card(card)
         spec["gpu_name"] = gpu_name
         spec["rent_btn"] = rent_btn
+
+        # 数据盘容量过滤（AUTODL_DATA_DISK_GB > 0 时启用）：
+        # 数据盘 + 可扩容 < 目标总容量的机器直接跳过——有些主机可扩容 0GB，
+        # 抢到也设不到目标容量，浪费一个名额还花冤枉钱（用户 2026-11-26 要求）。
+        if config.DATA_DISK_TARGET_GB > 0:
+            max_total = spec["data_disk_gb"] + spec["expandable_gb"]
+            if max_total < config.DATA_DISK_TARGET_GB:
+                logger.info(
+                    f"  跳过 {gpu_name}（内存{spec['memory_gb']}GB）：数据盘 "
+                    f"{spec['data_disk_gb']}GB+可扩容{spec['expandable_gb']}GB "
+                    f"< 目标 {config.DATA_DISK_TARGET_GB}GB"
+                )
+                continue
+
         machines.append(spec)
 
     machines.sort(key=lambda m: (m["memory_gb"], m["expandable_gb"]), reverse=True)
@@ -567,6 +581,78 @@ def configure_image(page: Page) -> None:
     logger.info("镜像配置完成")
 
 
+def configure_data_disk(page: Page) -> bool:
+    """创建页数据盘扩容：勾选「需要扩容」并把容量设到目标（AUTODL_DATA_DISK_GB）。
+
+    实测（2026-11-26，explore_create_disk2.py）：
+    - 「需要扩容」是 el-checkbox；勾选后出现 el-input-number.disk-size 输入框；
+    - 输入框 min=0，max=该机器的可扩容量（动态，如 51 / 1156）；
+    - **填的是新增 GB，不是总容量**：填 30 后规格区显示"免费50GB SSD，付费30GB"；
+    - Element UI 输入框需 JS 强制写值并派发 input/change 事件（与扩容弹窗同款手法）。
+
+    返回 False = 这台机器设不到目标容量（不该开机），调用方应放弃本机。
+    """
+    if config.DATA_DISK_TARGET_GB <= 0:
+        return True
+
+    need_added = config.DATA_DISK_TARGET_GB - 50  # 免费数据盘固定 50GB
+    if need_added <= 0:
+        logger.warning(
+            f"目标容量 {config.DATA_DISK_TARGET_GB}GB 未超过免费 50GB，无需扩容"
+        )
+        return True
+
+    logger.info(f"数据盘扩容：目标总容量 {config.DATA_DISK_TARGET_GB}GB（新增 {need_added}GB）")
+    cb = page.locator("label.el-checkbox:has-text('需要扩容')").first
+    try:
+        cb.wait_for(state="visible", timeout=5000)
+    except PlaywrightTimeoutError:
+        logger.warning("创建页没有「需要扩容」选项（DOM 变化或机器不支持），放弃本机")
+        return False
+
+    cls = cb.get_attribute("class") or ""
+    if "is-checked" not in cls:
+        cb.click(timeout=4000)
+        page.wait_for_timeout(1200)
+        logger.info("已勾选「需要扩容」")
+
+    box = page.locator(".el-input-number.disk-size input").first
+    try:
+        box.wait_for(state="visible", timeout=5000)
+        max_val = int(box.get_attribute("aria-valuemax") or "0")
+    except Exception:
+        logger.warning("未读到扩容容量输入框，放弃本机")
+        return False
+
+    if max_val < need_added:
+        logger.warning(
+            f"该机器可扩容上限 {max_val}GB < 需要 {need_added}GB（不该走到这里，"
+            f"选机器阶段应已过滤），放弃本机"
+        )
+        return False
+
+    box.evaluate(
+        """(el, val) => {
+            el.disabled = false;
+            el.removeAttribute('disabled');
+            const setter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            ).set;
+            setter.call(el, val);
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+        }""",
+        str(need_added),
+    )
+    page.wait_for_timeout(1000)
+    now_val = box.get_attribute("aria-valuenow")
+    if now_val != str(need_added):
+        logger.warning(f"扩容容量写值未生效（aria-valuenow={now_val}），放弃本机")
+        return False
+    logger.info(f"✓ 数据盘扩容已设置：+{need_added}GB（总 {config.DATA_DISK_TARGET_GB}GB）")
+    return True
+
+
 def handle_insufficient_gpu_popup(page: Page) -> bool:
     """处理'空闲GPU数量不足'弹窗，若存在则点确定并返回 True。"""
     popup_selectors = [
@@ -700,16 +786,29 @@ def power_on_instance(page: Page, entry: dict) -> bool:
         record_event("power_on_failed", {**meta, "reason": f"点击失败: {e}"})
         return False
 
-    # 若出现确认弹窗（文案含'开机'），点其中的确定
+    # 开机后的弹窗有两类（2026-11-26 补，与 expand_data_disk.py 同款修复）：
+    #   1) 计费确认「确认开机吗 ¥N/时」→ 点「确定/确认」（用户已授权开机）
+    #   2) 「该主机GPU不足」→ 只点「我知道了/我已知晓了」关闭，绝不点克隆/无卡模式
+    # 必须用 :visible 过滤：页面有 15 个隐藏 .el-dialog，不加会命中隐藏元素卡死。
     try:
-        dlg = page.locator(
-            ".el-dialog:has-text('开机'), .el-message-box:has-text('开机')"
-        ).first
+        dlg = page.locator(".el-message-box:visible, .el-dialog:visible").first
         dlg.wait_for(state="visible", timeout=3000)
-        dlg.locator("button:has-text('确定'), button:has-text('确认')").first.click(timeout=3000)
-        logger.info("  已确认开机弹窗")
+        txt = dlg.inner_text(timeout=1500).strip().replace("\n", " ")
+        logger.info(f"  开机弹窗: {txt[:80]}")
+        no_gpu = "GPU不足" in txt or "空闲GPU" in txt or "无卡" in txt
+        labels = ("我知道了", "我已知晓了") if no_gpu else ("确定", "确认", "立即开机")
+        for label in labels:
+            b = dlg.locator(f"button:has-text('{label}')").first
+            if b.count() > 0 and b.is_visible():
+                b.click(timeout=3000)
+                logger.info(f"  已点弹窗「{label}」")
+                break
+        if no_gpu:
+            logger.warning("  主机 GPU 不足，开机必然失败，不再等状态变化")
+            record_event("power_on_failed", {**meta, "reason": "弹窗提示主机GPU不足"})
+            return False
     except PlaywrightTimeoutError:
-        pass
+        pass  # 没弹窗，继续轮询状态
 
     # 轮询该实例状态：开机成功会变成 开机中/运行中
     for _ in range(10):
@@ -726,6 +825,67 @@ def power_on_instance(page: Page, entry: dict) -> bool:
     return False
 
 
+def manage_specified_instances(page: Page) -> tuple:
+    """指定实例 ID 模式（AUTODL_INSTANCE_IDS 非空时启用，2026-11-26 用户需求）。
+
+    逐台检查用户指定的实例（按配置顺序）：
+      - 运行中/占用  -> 跳过（已满足，不算失败）；
+      - 已关机       -> 尝试开机；该主机无空闲 GPU 开机失败 -> 名额转去市场抢新机。
+    每台独立判断、依次进行；名额受 MAX_RUNNING_INSTANCES 约束：
+    设 1 则开满 1 台即停，即使列表里还有别的已关机实例也不开（用户明确要求）。
+    运行中数量按**账号全部运行中实例**计（含未指定的），与既有上限语义一致。
+
+    返回 (状态, seen_ids)，状态含义同 manage_instances。
+    """
+    goto_instance_list(page)
+    rows = parse_instance_rows(page)
+    seen_ids = {r["id"] for r in rows}
+    by_id = {r["id"]: r for r in rows}
+
+    for iid in config.INSTANCE_IDS:
+        if iid not in by_id:
+            logger.warning(f"指定的实例 {iid} 不在实例列表中（可能已释放或 ID 写错）")
+
+    targets = [by_id[i] for i in config.INSTANCE_IDS if i in by_id]
+    running_all = [r for r in rows if r["status"] and r["status"] not in RELEASED_STATES]
+
+    logger.info(f"指定实例模式：共 {len(config.INSTANCE_IDS)} 台，逐台检查——")
+    for r in targets:
+        state = r["status"] or "未知"
+        extra = f"，资源标记: {r['gpu_tips']}" if r["gpu_tips"] else ""
+        logger.info(f"  [{state}] {r['id']} ({r['region']}){extra}")
+
+    if config.MAX_RUNNING_INSTANCES > 0 and len(running_all) >= config.MAX_RUNNING_INSTANCES:
+        logger.info(
+            f"账号运行中已达上限 {config.MAX_RUNNING_INSTANCES}，不开机/不租新"
+        )
+        return "at_limit", seen_ids
+
+    if config.MAX_RUNNING_INSTANCES > 0:
+        slots = config.MAX_RUNNING_INSTANCES - len(running_all)
+    else:
+        slots = max(1, sum(1 for r in targets if r["status"] in RELEASED_STATES))
+
+    powered = 0
+    for entry in targets:
+        if powered >= slots:
+            logger.info(f"已开满 {slots} 台（上限 {config.MAX_RUNNING_INSTANCES}），停止，"
+                        f"不再看后续指定实例")
+            break
+        if entry["status"] in RELEASED_STATES:
+            if power_on_instance(page, entry):
+                powered += 1
+            # 开机失败（主机无空闲） -> 继续看下一台指定实例；
+            # 全部看完仍有缺口时，由返回值 need_rent 通知主循环去市场抢新机。
+
+    if powered >= slots:
+        logger.info(f"指定实例已满足（本轮开机 {powered} 台），无需租新")
+        return "powered", seen_ids
+
+    logger.info(f"指定实例开机 {powered} 台后仍有 {slots - powered} 台缺口，将去市场抢新机")
+    return "need_rent", seen_ids
+
+
 def manage_instances(page: Page) -> tuple:
     """盘点已有实例，按需开机复用。
 
@@ -735,6 +895,10 @@ def manage_instances(page: Page) -> tuple:
     - 'need_rent': 没有可复用的关机实例（或全部开机失败），需要去市场租新机
     seen_ids 供租新后对比找出新实例 ID 用。
     """
+    if config.INSTANCE_IDS:
+        # 指定实例 ID 模式优先于一切（显式指定 = 明确意图，不受 REUSE_INSTANCES 约束）
+        return manage_specified_instances(page)
+
     if config.MAX_RUNNING_INSTANCES <= 0:
         # 上限未启用：保持旧行为，直接租新
         goto_instance_list(page)
@@ -818,6 +982,11 @@ def create_machine(page: Page) -> str:
     'aborted' 表示被人工确认闸门中止，未真正下单。
     """
     configure_image(page)
+
+    # 数据盘扩容（AUTODL_DATA_DISK_GB > 0 时）：设不到目标容量就放弃本机，
+    # 宁可继续蹲也不开一台容量不足的机器（用户 2026-11-26 要求）。
+    if not configure_data_disk(page):
+        return "insufficient"
 
     if config.DRY_RUN:
         logger.info("【DRY_RUN】已跑到'创建并开机'前一步，不会真的点击创建按钮")

@@ -1,0 +1,43 @@
+# 训练超参样例 —— 复制成 config.yaml 后按你的场景改。
+# 每个字段的"怎么定"见 references/04_train.md 第二节；这里是起点值，不是标准答案。
+# 路径用 WSL 视角写（/mnt/d/...），从 Windows 调 WSL 时脚本能直接用。
+
+# 模型：本地绝对路径，或 HF id。下载前先确认，别乱下（见 SKILL 硬约束）
+model: /mnt/d/modelscope/Qwen3-0.6B
+
+data:
+  train: /mnt/d/你的训练目录/data/train.jsonl
+  probe: /mnt/d/你的训练目录/data/probe.jsonl
+  seq_len: 1024              # 第 4 步数据 p99 向上取整；短数据别贪大
+  packing: false             # 短样本多可开；长度差异极大时关
+  assistant_only_loss: true  # 只对回答算 loss；对话格式要显式开
+  # thinking 开关（Qwen3/3.5 关键坑，见 04_train.md §2.1）：
+  # 数据无 <think> 标签 → false（train 和 infer 必须一致，否则是假对比）
+  enable_thinking: false
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: all-linear   # trl+peft 用 all-linear；swift 要写具体模块名
+
+train:
+  output_dir: /mnt/d/你的训练目录/outputs
+  per_device_train_batch_size: 2      # OOM 先降这个
+  gradient_accumulation_steps: 4      # 保证 effective batch ≥ 32
+  num_train_epochs: 3
+  learning_rate: 2.0e-4               # LoRA 起点 2e-4；全参 2e-5
+  warmup_steps: 1
+  gradient_checkpointing: true        # 省 30~50% 显存，慢 20~30%
+  use_liger_kernel: false             # 省显存一行开关：显存紧改 true（见 04_train.md §3.1）
+                                      # 需先 pip install liger-kernel；用 unsloth 时别开
+  attn_implementation: eager          # 报 flash-attn 错就用 eager
+  optim: adamw_torch
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  save_total_limit: 3
+  seed: 0
+  logging_steps: 10
+  save_steps: 30
+  vram_ceiling_mib: 6714              # 可用显存 × 0.85，按实测填
+  time_budget_hours: 2.0              # 第 1 步定的速度线

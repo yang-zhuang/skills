@@ -177,13 +177,28 @@ def wait_shutdown_then_power_on(page, target):
         return False
     on_btn.wait_for(state="visible", timeout=4000)
     on_btn.click(timeout=5000)
+    # 开机弹窗有两类（2026-11-26 补，与 grab_350w.py 同款修复）：
+    #   1) 计费确认「确认开机吗」→ 点「确定」（用户已授权开机）
+    #   2) 「该主机GPU不足」→ 只点「我知道了」关闭，绝不点克隆/无卡模式
+    # 必须用 :visible 过滤：页面有 15 个隐藏 .el-dialog，不加会命中隐藏元素卡死。
     try:
-        dlg = page.locator(".el-message-box:visible").first
-        dlg.wait_for(state="visible", timeout=3000)
-        dlg.locator("button:has-text('确定'), button:has-text('确认')").first.click(timeout=3000)
-        print("  已确认开机弹窗")
-    except Exception:
-        pass
+        box = page.locator(".el-message-box:visible, .el-dialog:visible").first
+        box.wait_for(state="visible", timeout=3000)
+        txt = box.inner_text(timeout=1500).strip().replace("\n", " ")
+        print(f"  开机弹窗: {txt[:80]}")
+        no_gpu = "GPU不足" in txt or "空闲GPU" in txt or "无卡" in txt
+        labels = ("我知道了", "我已知晓了") if no_gpu else ("确定", "确认", "立即开机")
+        for label in labels:
+            b = box.locator(f"button:has-text('{label}')").first
+            if b.count() > 0 and b.is_visible():
+                b.click(timeout=3000)
+                print(f"  已点弹窗「{label}」")
+                break
+        if no_gpu:
+            print("  !! 主机 GPU 不足，开机失败；机器已在计费，请人工处理，勿重复下单")
+            return False
+    except Exception as e:  # noqa: BLE001
+        print(f"  开机弹窗处理异常（未点任何按钮）: {e}")
 
     # 轮询等待回到运行中
     for _ in range(60):
