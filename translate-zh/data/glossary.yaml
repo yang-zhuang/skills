@@ -140,7 +140,7 @@ translate:
   retrieval: 检索          # freq 553
   chunk: 分块              # freq 97
   vector: 向量             # freq 699
-  trace: 追踪              # freq 539
+  trace: 追踪              # freq 539；泛指概念用「追踪」，作可数实例（a trace / each trace）时译「追踪记录」，与 traces 统一（2026-11-27 the-agent-lake 实测补注）
   traces: 追踪记录         # freq 801
   evaluation: 评估         # freq 1006
   evals: 评估              # freq 436，作名词时译「评估集」
