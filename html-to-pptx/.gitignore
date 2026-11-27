@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.pyc
+
+# 本机配置 / 临时产物
+.env
+work/
